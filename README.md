@@ -8,24 +8,24 @@ This project modifies the **Hybrid Encoder** of [RT-DETR-S](https://github.com/l
 
 ## 📊 COCO Evaluation
 
-Results are reported on the **COCO 2017 validation set (val2017)**. The following are metrics from the **best epoch (Epoch 24)**:
+Results are reported on the **COCO 2017 validation set (val2017)**. The following are metrics from the **best epoch (Epoch 28)**:
 
-| Metric                        | Score     |
-| ----------------------------- | --------- |
-| **AP@\[IoU=0.50:0.95]** (all) | **0.649** |
-| AP@\[IoU=0.50] (all)          | 0.843     |
-| AP@\[IoU=0.75] (all)          | 0.703     |
-| AP (small)                    | 0.418     |
-| AP (medium)                   | 0.660     |
-| AP (large)                    | 0.851     |
-| AR@\[IoU=0.50:0.95] @1        | 0.468     |
-| AR@\[IoU=0.50:0.95] @10       | 0.609     |
-| AR@\[IoU=0.50:0.95] @100      | 0.701     |
-| AR (small)                    | 0.584     |
-| AR (medium)                   | 0.681     |
-| AR (large)                    | 0.863     |
-| AR@\[IoU=0.50]                | 0.900     |
-| AR@\[IoU=0.75]                | 0.778     |
+| Metric | IoU Threshold | Area       | Max Detections | Value |
+|--------|---------------|------------|----------------|-------|
+| **AP** | 0.50:0.95     | all        | 100            | 0.659 |
+| **AP** | 0.50          | all        | 100            | 0.851 |
+| **AP** | 0.75          | all        | 100            | 0.710 |
+| **AP** | 0.50:0.95     | small      | 100            | 0.479 |
+| **AP** | 0.50:0.95     | medium     | 100            | 0.689 |
+| **AP** | 0.50:0.95     | large      | 100            | 0.812 |
+| **AR** | 0.50:0.95     | all        | 1              | 0.468 |
+| **AR** | 0.50:0.95     | all        | 10             | 0.646 |
+| **AR** | 0.50:0.95     | all        | 100            | 0.733 |
+| **AR** | 0.50:0.95     | small      | 100            | 0.650 |
+| **AR** | 0.50:0.95     | medium     | 100            | 0.719 |
+| **AR** | 0.50:0.95     | large      | 100            | 0.837 |
+| **AR** | 0.50          | all        | 100            | 0.900 |
+| **AR** | 0.75          | all        | 100            | 0.813 |
 
 ---
 
