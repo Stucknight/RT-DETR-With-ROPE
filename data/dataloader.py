@@ -1,8 +1,8 @@
-import torch
-from torch.utils import data
-import torch.nn.functional as F
-
 import random
+
+import torch
+import torch.nn.functional as F
+from torch.utils import data
 
 
 class DataLoader(data.DataLoader):

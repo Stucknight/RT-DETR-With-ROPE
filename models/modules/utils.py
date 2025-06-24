@@ -1,11 +1,10 @@
-import torch
-from torch import Tensor
-import torch.nn.functional as F
-from torchvision.ops.boxes import box_area
-
 import math
-
 from typing import List
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+from torchvision.ops.boxes import box_area
 
 
 def box_cxcywh_to_xyxy(x: Tensor) -> Tensor:
@@ -71,6 +70,7 @@ def masks_to_boxes(masks):
     y_min = y_mask.masked_fill(~(masks.bool()), 1e8).flatten(1).min(-1)[0]
 
     return torch.stack([x_min, y_min, x_max, y_max], 1)
+
 
 def get_contrastive_denoising_training_group(targets,
                                              num_classes,
@@ -154,13 +154,16 @@ def get_contrastive_denoising_training_group(targets,
 
     return input_query_logits, input_query_bbox_unact, attn_mask, dn_meta
 
+
 def inverse_sigmoid(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     x = x.clip(min=0., max=1.)
     return torch.log(x.clip(min=eps) / (1 - x).clip(min=eps))
 
+
 def bias_init_with_prob(prior_prob=0.01):
     bias_init = float(-math.log((1 - prior_prob) / prior_prob))
     return bias_init
+
 
 def deformable_attention_core_func_v2(
         value: torch.Tensor,

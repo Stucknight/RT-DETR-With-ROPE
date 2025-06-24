@@ -4,6 +4,7 @@ import torchvision
 
 from ...data.dataset.coco_dataset import mscoco_label2category
 
+
 def mod(a, b):
     out = a - a // b * b
     return out

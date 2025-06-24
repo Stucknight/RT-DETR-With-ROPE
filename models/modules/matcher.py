@@ -1,10 +1,11 @@
+from typing import Dict
+
 import torch
 import torch.nn as nn
-
-from .utils import generalized_box_iou, box_cxcywh_to_xyxy
 from scipy.optimize import linear_sum_assignment
 
-from typing import Dict
+from .utils import generalized_box_iou, box_cxcywh_to_xyxy
+
 
 class HungarianMatcher(nn.Module):
     def __init__(self, weight_dict, use_focal_loss=False, alpha=0.25, gamma=2.0):

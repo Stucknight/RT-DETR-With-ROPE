@@ -1,5 +1,6 @@
-import math
 import copy
+import math
+from typing import OrderedDict, Optional
 
 import torch
 import torch.nn as nn
@@ -7,7 +8,6 @@ import torch.nn.functional as F
 
 from .presnet import ConvNormLayer
 
-from typing import OrderedDict, Optional
 
 class RepVggBlock(nn.Module):
     def __init__(self, ch_in, ch_out):
@@ -222,7 +222,6 @@ class HybridEncoder(nn.Module):
                  dropout=0.0,
                  use_encoder_idx=(2,),
                  num_encoder_layers=1,
-                 pe_temperature=10000,
                  expansion=0.5,
                  depth_mult=1.0,
                  eval_spatial_size=None):

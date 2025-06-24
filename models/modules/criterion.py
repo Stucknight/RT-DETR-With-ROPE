@@ -1,10 +1,11 @@
+import copy
+
 import torch
 import torch.nn as nn
 import torchvision
 
-import copy
-
 from .utils import box_iou, box_cxcywh_to_xyxy, generalized_box_iou
+
 
 class RTDETRCriterionv2(nn.Module):
     def __init__(self,
@@ -183,7 +184,8 @@ class RTDETRCriterionv2(nn.Module):
             iou, _ = box_iou(box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes))
             iou = torch.diag(iou)
         elif self.boxes_weight_format == 'giou':
-            iou = torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes)))
+            iou = torch.diag(
+                generalized_box_iou(box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes)))
         else:
             raise AttributeError()
 

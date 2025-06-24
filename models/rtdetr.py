@@ -1,5 +1,6 @@
 import torch.nn as nn
 
+
 class RTDETR(nn.Module):
     def __init__(self, backbone, encoder, decoder):
         super().__init__()

@@ -1,11 +1,12 @@
+import copy
+import math
+
 import torch
 import torch.nn as nn
 
-import math
-import copy
 
 class ModelEMA(object):
-    def __init__(self, model: nn.Module, decay: float=0.9999, warmups: int=2000, ):
+    def __init__(self, model: nn.Module, decay: float = 0.9999, warmups: int = 2000, ):
         super().__init__()
 
         self.module = copy.deepcopy(model).eval()
@@ -17,7 +18,6 @@ class ModelEMA(object):
 
         for p in self.module.parameters():
             p.requires_grad_(False)
-
 
     def update(self, model: nn.Module):
         with torch.no_grad():

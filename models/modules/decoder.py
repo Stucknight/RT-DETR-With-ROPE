@@ -1,14 +1,15 @@
+import copy
+import functools
+import math
+from typing import List, OrderedDict
+
 import torch
 import torch.nn as nn
 import torch.nn.init as init
 
-import math
-import copy
-import functools
+from .utils import inverse_sigmoid, bias_init_with_prob, deformable_attention_core_func_v2, \
+    get_contrastive_denoising_training_group
 
-from .utils import inverse_sigmoid, bias_init_with_prob, deformable_attention_core_func_v2, get_contrastive_denoising_training_group
-
-from typing import List, OrderedDict
 
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
@@ -108,7 +109,7 @@ class MSDeformableAttention(nn.Module):
 
         attention_weights = self.attention_weights(query).reshape(bs, Len_q, self.num_heads, sum(self.num_points_list))
         attention_weights = nn.functional.softmax(attention_weights, dim=-1).reshape(bs, Len_q, self.num_heads,
-                                                                         sum(self.num_points_list))
+                                                                                     sum(self.num_points_list))
 
         if reference_points.shape[-1] == 2:
             offset_normalizer = torch.tensor(value_spatial_shapes)
@@ -283,7 +284,8 @@ class RTDETRTransformerv2(nn.Module):
 
         self._build_input_proj_layer(feat_channels)
 
-        decoder_layer = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, num_levels, num_points, cross_attn_method=cross_attn_method)
+        decoder_layer = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, num_levels, num_points,
+                                                cross_attn_method=cross_attn_method)
         self.decoder = TransformerDecoder(hidden_dim, decoder_layer, num_layers, eval_idx)
 
         self.num_denoising = num_denoising

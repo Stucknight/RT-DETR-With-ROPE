@@ -6,6 +6,7 @@ from faster_coco_eval.core import mask as coco_mask
 
 from ..utils import convert_to_tv_tensor
 
+
 class CocoDetection(torchvision.datasets.CocoDetection):
     def __init__(self, img_folder, ann_file, transforms, return_masks=False, remap_mscoco_category=False):
         super(CocoDetection, self).__init__(img_folder, ann_file)
@@ -66,6 +67,7 @@ class CocoDetection(torchvision.datasets.CocoDetection):
     def label2category(self, ):
         return {i: cat['id'] for i, cat in enumerate(self.categories)}
 
+
 def convert_coco_poly_to_mask(segmentations, height, width):
     masks = []
     for polygons in segmentations:
@@ -81,6 +83,7 @@ def convert_coco_poly_to_mask(segmentations, height, width):
     else:
         masks = torch.zeros((0, height, width), dtype=torch.uint8)
     return masks
+
 
 class ConvertCocoPolysToMask(object):
     def __init__(self, return_masks=False):
@@ -147,6 +150,7 @@ class ConvertCocoPolysToMask(object):
         target["orig_size"] = torch.as_tensor([int(w), int(h)])
 
         return image, target
+
 
 mscoco_category2name = {
     1: 'person',

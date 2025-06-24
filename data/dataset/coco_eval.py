@@ -1,10 +1,11 @@
-import os
 import contextlib
 import copy
+import os
+
 import numpy as np
 import torch
-
 from faster_coco_eval import COCO, COCOeval_faster
+
 
 class CocoEvaluator(object):
     def __init__(self, coco_gt):
@@ -32,7 +33,9 @@ class CocoEvaluator(object):
                 self.coco_eval.params.imgIds = list(img_ids)
                 self.coco_eval.evaluate()
 
-        self.eval_imgs.append(np.array(self.coco_eval._evalImgs_cpp).reshape(len(self.coco_eval.params.catIds), len(self.coco_eval.params.areaRng), len(self.coco_eval.params.imgIds)))
+        self.eval_imgs.append(np.array(self.coco_eval._evalImgs_cpp).reshape(len(self.coco_eval.params.catIds),
+                                                                             len(self.coco_eval.params.areaRng),
+                                                                             len(self.coco_eval.params.imgIds)))
 
     def accumulate(self):
         self.coco_eval.accumulate()
