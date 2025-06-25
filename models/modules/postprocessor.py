@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision
 
-from ...data.dataset.coco_dataset import mscoco_label2category
+from data.dataset.coco_dataset import mscoco_label2category
 
 
 def mod(a, b):
