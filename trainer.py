@@ -32,7 +32,14 @@ def train_one_epoch(model, ema, criterion, dataloader, optimizer, scaler, epoch,
 
         if use_wandb:
             import wandb
-            wandb.log({**loss_dict, "step_loss": loss.item(), "epoch": epoch})
+            wandb.log({
+                "loss_vfl": loss_dict.get("loss_vfl", 0.0),
+                "loss_giou": loss_dict.get("loss_giou", 0.0),
+                "loss_bbox": loss_dict.get("loss_bbox", 0.0),
+                "step_loss": loss.item(),
+                "epoch": epoch,
+                "lr": optimizer.param_groups[0]['lr']
+            })
 
     avg_loss = epoch_loss / len(dataloader)
     return avg_loss
