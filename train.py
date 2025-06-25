@@ -23,16 +23,7 @@ from models.rtdetr import RTDETR
 from trainer import train_one_epoch, evaluate
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--resume", type=str, help="Path to checkpoint to resume from", default=None)
-    parser.add_argument("--epochs", type=int, default=120)
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--output_dir", type=str, default="checkpoints")
-    parser.add_argument("--disable_wandb", action="store_true")
-    args = parser.parse_args()
-
+def main(args):
     os.makedirs(args.output_dir, exist_ok=True)
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -135,4 +126,21 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    parser = argparse.ArgumentParser(description="Train RT-DETR on COCO dataset")
+    parser.add_argument("--resume", type=str, help="Path to checkpoint to resume from", default=None)
+    parser.add_argument("--epochs", type=int, default=120)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--output_dir", type=str, default="checkpoints")
+    parser.add_argument("--disable_wandb", action="store_true")
+
+    if len(sys.argv) == 1:
+        parser.print_help()
+        print("\nExample:")
+        print("  python train.py --epochs 100 --batch_size 8 --lr 5e-5 --output_dir checkpoints")
+        sys.exit(1)
+
+    args = parser.parse_args()
+    main(args)
