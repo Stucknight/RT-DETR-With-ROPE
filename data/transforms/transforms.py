@@ -57,7 +57,7 @@ class ConvertPILImage:
         self.scale = scale
 
     def __call__(self, inpt: Any, params: Dict[str, Any], dataset) -> Any:
-        inpt = F.pil_to_tensor(inpt)
+        inpt = T.functional.pil_to_tensor(inpt)
         if self.dtype == 'float32':
             inpt = inpt.float()
 
