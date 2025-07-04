@@ -223,15 +223,13 @@ class HybridEncoder(nn.Module):
                  use_encoder_idx=(2,),
                  num_encoder_layers=1,
                  expansion=0.5,
-                 depth_mult=1.0,
-                 eval_spatial_size=None):
+                 depth_mult=1.0):
         super().__init__()
         self.in_channels = list(in_channels)
         self.feat_strides = list(feat_strides)
         self.hidden_dim = hidden_dim
         self.use_encoder_idx = list(use_encoder_idx)
         self.num_encoder_layers = num_encoder_layers
-        self.eval_spatial_size = eval_spatial_size
         self.out_channels = [hidden_dim] * len(in_channels)
         self.out_strides = self.feat_strides
 
