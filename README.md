@@ -1,13 +1,8 @@
-# RT-DETR-Improved
+# RT-DETR-With-ROPE
 
-**An enhanced version of RT-DETR-S with Rotary Positional Embedding (RoPE)**
+**A version of RT-DETR with Rotary Positional Embedding (ROPE)**
 
-This project modifies the **Hybrid Encoder** of [RT-DETR-S](https://github.com/lyuwenyu/RT-DETR) by replacing its
-default **sinusoidal positional encoding** with **Rotary Positional Embedding (RoPE)**.
-
----
-
-## 📊 COCO Evaluation
+## COCO Evaluation
 
 Results are reported on the **COCO 2017 validation set (val2017)**. The following are metrics from the **best epoch (
 Epoch 28)**:
@@ -42,20 +37,20 @@ Epoch 28)**:
 
 ---
 
-## 📌 Notes
+## Notes
 
-* The base model used is RT-DETR-S with a pretrained backbone.
+* The model used is RT-DETR-S with a pretrained backbone.
 * Model trained from scratch on COCO, using EMA and cosine learning rate scheduling.
 
 ---
 
-## 🚀 Try It Out
+## Try It Out
 
 Use the `RT_DETR_TEST.ipynb` to try it out.
 
 ---
 
-## 📜 Citation
+## Citation
 
 ```
 @misc{lv2023detrs,
