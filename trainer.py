@@ -2,7 +2,8 @@ import torch
 from tqdm import tqdm
 
 
-def train_one_epoch(model, ema, criterion, dataloader, optimizer, scaler, epoch, device, use_wandb=False):
+def train_one_epoch(model, ema, criterion, dataloader, optimizer, scheduler, scaler, epoch, device, clip_max_norm=0.0,
+                    use_wandb=False):
     model.train()
     criterion.train()
     dataloader.set_epoch(epoch)
@@ -23,9 +24,13 @@ def train_one_epoch(model, ema, criterion, dataloader, optimizer, scaler, epoch,
 
         loss = sum(loss_dict.values())
         scaler.scale(loss).backward()
+        if clip_max_norm > 0:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad()
+        scheduler.step()
         ema.update(model)
 
         epoch_loss += loss.item()

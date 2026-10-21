@@ -1,10 +1,12 @@
 import argparse
 import logging
+import math
 import os
+import re
 
 import torch
 from pycocotools.coco import COCO
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import LambdaLR
 
 from data.dataloader import BatchImageCollateFuncion, DataLoader
 from data.dataset.coco_dataset import CocoDetection
@@ -21,6 +23,19 @@ from models.modules.postprocessor import RTDETRPostProcessor
 from models.modules.presnet import PResNet
 from models.rtdetr import RTDETR
 from trainer import train_one_epoch, evaluate
+
+
+def load_optimizer_state(optimizer, state, model):
+    if len(state["param_groups"]) == len(optimizer.param_groups):
+        optimizer.load_state_dict(state)
+        return
+    # Older checkpoints used a single param group over model.parameters(); carry each parameter's state over
+    old_index = {id(p): i for i, p in enumerate(model.parameters())}
+    params = [p for group in optimizer.param_groups for p in group["params"]]
+    new_state = optimizer.state_dict()
+    new_state["state"] = {j: state["state"][old_index[id(p)]] for j, p in enumerate(params)
+                          if old_index[id(p)] in state["state"]}
+    optimizer.load_state_dict(new_state)
 
 
 def main(args):
@@ -78,10 +93,26 @@ def main(args):
 
     matcher = HungarianMatcher({'cost_class': 2, 'cost_bbox': 5, 'cost_giou': 2}, use_focal_loss=True)
     criterion = RTDETRCriterionv2(matcher, {'loss_vfl': 1, 'loss_bbox': 5, 'loss_giou': 2}, losses=['vfl', 'boxes'],
-                                  num_classes=80)
+                                  alpha=0.75, gamma=2.0, num_classes=80)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, fused=device == "cuda")
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
+    # No weight decay on BatchNorm / LayerNorm parameters
+    params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+    param_groups = [
+        {"params": [p for n, p in params if not re.search(r"(?:norm|bn)", n)]},
+        {"params": [p for n, p in params if re.search(r"(?:norm|bn)", n)], "weight_decay": 0.0},
+    ]
+    optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay,
+                                  fused=device == "cuda")
+
+    # Stepped every iteration: linear warmup over the first warmup_iters, times a cosine decay that changes once
+    # per epoch (epoch e uses 0.5 * (1 + cos(pi * (e - 1) / epochs))).
+    iters_per_epoch = len(train_dataloader)
+
+    def lr_lambda(it):
+        warmup = min(1.0, (it + 1) / args.warmup_iters) if args.warmup_iters > 0 else 1.0
+        return warmup * 0.5 * (1 + math.cos(math.pi * (it // iters_per_epoch) / args.epochs))
+
+    scheduler = LambdaLR(optimizer, lr_lambda)
     scaler = torch.amp.GradScaler(device)
     postprocessor = RTDETRPostProcessor(num_classes=80, remap_mscoco_category=True)
     coco_evaluator = CocoEvaluator(COCO("annotations/instances_val2017.json"))
@@ -95,11 +126,13 @@ def main(args):
         # Older checkpoints only stored the EMA weights
         model.load_state_dict(checkpoint.get("model", checkpoint["ema"]["module"]))
         ema.load_state_dict(checkpoint["ema"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
-        if "scheduler" in checkpoint:
+        load_optimizer_state(optimizer, checkpoint["optimizer"], model)
+        if "scheduler" in checkpoint and "lr_lambdas" in checkpoint["scheduler"]:
             scheduler.load_state_dict(checkpoint["scheduler"])
         else:
-            scheduler.last_epoch = checkpoint["epoch"]
+            # Older checkpoints used a per-epoch scheduler; jump to the first iteration of the next epoch
+            scheduler.last_epoch = checkpoint["epoch"] * iters_per_epoch - 1
+            scheduler.step()
         scaler.load_state_dict(checkpoint["scaler"])
         best_score = checkpoint.get("best_score", 0.0)
         start_epoch = checkpoint["epoch"] + 1
@@ -108,11 +141,9 @@ def main(args):
         train_dataloader.set_epoch(epoch)
         val_dataloader.set_epoch(epoch)
 
-        avg_epoch_loss = train_one_epoch(model, ema, criterion, train_dataloader, optimizer, scaler, epoch, device,
-                                         use_wandb)
+        avg_epoch_loss = train_one_epoch(model, ema, criterion, train_dataloader, optimizer, scheduler, scaler, epoch,
+                                         device, args.clip_max_norm, use_wandb)
         val_score = evaluate(model, postprocessor, coco_evaluator, val_dataloader, device, epoch, use_wandb)
-
-        scheduler.step()
 
         logger.info(
             f"[Epoch {epoch}] Train Loss: {avg_epoch_loss:.4f} | Val mAP: {val_score:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}"
@@ -144,6 +175,9 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=120)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument("--warmup_iters", type=int, default=2000, help="Linear LR warmup iterations (0 to disable)")
+    parser.add_argument("--clip_max_norm", type=float, default=0.1, help="Gradient clipping max norm (0 to disable)")
     parser.add_argument("--output_dir", type=str, default="checkpoints")
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--disable_wandb", action="store_true")
