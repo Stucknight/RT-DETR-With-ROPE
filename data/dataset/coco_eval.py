@@ -37,7 +37,17 @@ class CocoEvaluator(object):
                                                                              len(self.coco_eval.params.areaRng),
                                                                              len(self.coco_eval.params.imgIds)))
 
+    def synchronize(self):
+        # Each update() call overwrites the per-batch state of coco_eval, so merge the
+        # per-image results from every batch before accumulating over the full set.
+        img_ids, idx = np.unique(np.array(self.img_ids), return_index=True)
+        eval_imgs = np.concatenate(self.eval_imgs, axis=2)[..., idx]
+        self.coco_eval.params.imgIds = img_ids.tolist()
+        self.coco_eval._paramsEval = copy.deepcopy(self.coco_eval.params)
+        self.coco_eval._evalImgs_cpp = eval_imgs.ravel().tolist()
+
     def accumulate(self):
+        self.synchronize()
         self.coco_eval.accumulate()
 
     def summarize(self):
