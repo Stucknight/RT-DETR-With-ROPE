@@ -94,8 +94,8 @@ class Mixed2DRoPE(nn.Module):
         assert head_dim % 4 == 0, "head_dim must be divisible by 4 for 2‑D RoPE"
         self.head_dim = head_dim
         self.num_heads = num_heads
-        d_half = head_dim // 2
-        mag = 1.0 / (theta ** (torch.arange(0, d_half, 2).float() / head_dim))
+        # One magnitude per rotation pair in each half: theta^(-4i / head_dim), i = 0 .. head_dim/4 - 1 (RoPE-Mixed)
+        mag = 1.0 / (theta ** (torch.arange(0, head_dim, 4).float() / head_dim))
         fx, fy = [], []
         for _ in range(num_heads):
             angle = torch.rand(1) * math.tau if rotate else torch.zeros(1)
@@ -124,8 +124,9 @@ class Mixed2DRoPE(nn.Module):
         if key in self._cache:
             return self._cache[key]
 
-        t_x = torch.arange(w, device=device).repeat_interleave(h).to(dtype)
-        t_y = torch.arange(h, device=device).repeat(w).to(dtype)
+        # Tokens come from feat.flatten(2), i.e. row-major: index = y * w + x
+        t_x = torch.arange(w, device=device).repeat(h).to(dtype)
+        t_y = torch.arange(h, device=device).repeat_interleave(w).to(dtype)
 
         angle = ((t_x.unsqueeze(0).unsqueeze(0).unsqueeze(-1) * self.freq_x.unsqueeze(1)) +
                  (t_y.unsqueeze(0).unsqueeze(0).unsqueeze(-1) * self.freq_y.unsqueeze(1)))
@@ -168,7 +169,8 @@ class RotaryMultiheadAttention(nn.Module):
         k = k.reshape(B * self.num_heads, L, self.head_dim)
         v = v.reshape(B * self.num_heads, L, self.head_dim)
 
-        attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask, dropout_p=float(self.dropout.p))
+        attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask,
+                                                  dropout_p=float(self.dropout.p) if self.training else 0.0)
         attn_out = attn_out.view(B, self.num_heads, L, self.head_dim).permute(0, 2, 1, 3).reshape(B, L, self.embed_dim)
         return self.o_proj(attn_out)
 
