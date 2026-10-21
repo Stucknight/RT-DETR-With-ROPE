@@ -32,7 +32,8 @@ def main(args):
     val_dataset = CocoDetection("val2017", "annotations/instances_val2017.json", transforms=val_trans,
                                 remap_mscoco_category=True)
     val_collate = BatchImageCollateFuncion()
-    val_dataloader = DataLoader(val_dataset, args.batch_size, shuffle=False, collate_fn=val_collate)
+    val_dataloader = DataLoader(val_dataset, args.batch_size, shuffle=False, collate_fn=val_collate,
+                                num_workers=args.num_workers, pin_memory=True)
 
     backbone = PResNet(18)
     encoder = HybridEncoder()
@@ -56,6 +57,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate RT-DETR on COCO validation set")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint")
     parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=8)
 
     args = parser.parse_args()
     main(args)

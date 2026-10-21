@@ -51,6 +51,36 @@ def generalized_box_iou(boxes1, boxes2):
     return iou - (area - union) / area
 
 
+def elementwise_box_iou(boxes1: Tensor, boxes2: Tensor):
+    """IoU between corresponding rows of boxes1 and boxes2, i.e. diag(box_iou(boxes1, boxes2))."""
+    area1 = box_area(boxes1)
+    area2 = box_area(boxes2)
+
+    lt = torch.max(boxes1[:, :2], boxes2[:, :2])
+    rb = torch.min(boxes1[:, 2:], boxes2[:, 2:])
+
+    wh = (rb - lt).clamp(min=0)
+    inter = wh[:, 0] * wh[:, 1]
+
+    union = area1 + area2 - inter
+
+    iou = inter / union
+    return iou, union
+
+
+def elementwise_generalized_box_iou(boxes1: Tensor, boxes2: Tensor):
+    """GIoU between corresponding rows, i.e. diag(generalized_box_iou(boxes1, boxes2))."""
+    iou, union = elementwise_box_iou(boxes1, boxes2)
+
+    lt = torch.min(boxes1[:, :2], boxes2[:, :2])
+    rb = torch.max(boxes1[:, 2:], boxes2[:, 2:])
+
+    wh = (rb - lt).clamp(min=0)
+    area = wh[:, 0] * wh[:, 1]
+
+    return iou - (area - union) / area
+
+
 def masks_to_boxes(masks):
     if masks.numel() == 0:
         return torch.zeros((0, 4), device=masks.device)

@@ -35,6 +35,7 @@ def main(args):
         wandb.init(project="RT-DETR-Train", config=vars(args))
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch.backends.cudnn.benchmark = True
 
     train_trans = Compose([
         RandomPhotometricDistort(p=0.5),
@@ -62,8 +63,12 @@ def main(args):
                                              stop_epoch=117)
     val_collate = BatchImageCollateFuncion()
 
-    train_dataloader = DataLoader(train_dataset, args.batch_size, shuffle=True, collate_fn=train_collate)
-    val_dataloader = DataLoader(val_dataset, args.batch_size * 2, shuffle=False, collate_fn=val_collate)
+    # Workers are re-created every epoch (no persistent_workers) so they pick up set_epoch() for the
+    # augmentation / multi-scale schedules.
+    train_dataloader = DataLoader(train_dataset, args.batch_size, shuffle=True, collate_fn=train_collate,
+                                  num_workers=args.num_workers, pin_memory=True, drop_last=True)
+    val_dataloader = DataLoader(val_dataset, args.batch_size * 2, shuffle=False, collate_fn=val_collate,
+                                num_workers=args.num_workers, pin_memory=True)
 
     backbone = PResNet(18, pretrained=True)
     encoder = HybridEncoder()
@@ -75,7 +80,7 @@ def main(args):
     criterion = RTDETRCriterionv2(matcher, {'loss_vfl': 1, 'loss_bbox': 5, 'loss_giou': 2}, losses=['vfl', 'boxes'],
                                   num_classes=80)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, fused=device == "cuda")
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
     scaler = torch.amp.GradScaler(device)
     postprocessor = RTDETRPostProcessor(num_classes=80, remap_mscoco_category=True)
@@ -87,10 +92,14 @@ def main(args):
     if args.resume:
         logger.info(f"Resuming from checkpoint: {args.resume}")
         checkpoint = torch.load(args.resume, map_location=device)
-        model.load_state_dict(checkpoint["ema"]["module"])
+        # Older checkpoints only stored the EMA weights
+        model.load_state_dict(checkpoint.get("model", checkpoint["ema"]["module"]))
         ema.load_state_dict(checkpoint["ema"])
         optimizer.load_state_dict(checkpoint["optimizer"])
-        scheduler.last_epoch = checkpoint["epoch"]
+        if "scheduler" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler"])
+        else:
+            scheduler.last_epoch = checkpoint["epoch"]
         scaler.load_state_dict(checkpoint["scaler"])
         best_score = checkpoint.get("best_score", 0.0)
         start_epoch = checkpoint["epoch"] + 1
@@ -113,8 +122,10 @@ def main(args):
             best_score = val_score
             save_path = os.path.join(args.output_dir, "model.pth")
             torch.save({
+                "model": model.state_dict(),
                 "ema": ema.state_dict(),
                 "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
                 "scaler": scaler.state_dict(),
                 "epoch": epoch,
                 "best_score": best_score
@@ -134,6 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--output_dir", type=str, default="checkpoints")
+    parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--disable_wandb", action="store_true")
 
     if len(sys.argv) == 1:

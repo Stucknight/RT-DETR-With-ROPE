@@ -1,5 +1,6 @@
 import copy
 import math
+import warnings
 from typing import OrderedDict, Optional
 
 import torch
@@ -100,10 +101,22 @@ class Mixed2DRoPE(nn.Module):
             angle = torch.rand(1) * math.tau if rotate else torch.zeros(1)
             fx.append(torch.cat([mag * torch.cos(angle), mag * torch.cos(angle + math.pi / 2)], dim=-1))
             fy.append(torch.cat([mag * torch.sin(angle), mag * torch.sin(angle + math.pi / 2)], dim=-1))
-        self.register_buffer("freq_x", torch.stack(fx, 0), persistent=False)
-        self.register_buffer("freq_y", torch.stack(fy, 0), persistent=False)
+        # The random per-head rotations are part of the model, so they must be saved with the checkpoint
+        self.register_buffer("freq_x", torch.stack(fx, 0))
+        self.register_buffer("freq_y", torch.stack(fy, 0))
 
         self._cache: dict[tuple[int, int, torch.device, torch.dtype], tuple[torch.Tensor, torch.Tensor]] = {}
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+                              error_msgs):
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+                                      error_msgs)
+        self._cache.clear()
+        for name in ("freq_x", "freq_y"):
+            if prefix + name in missing_keys:
+                missing_keys.remove(prefix + name)
+                warnings.warn(f"{prefix + name} missing from checkpoint (saved before RoPE frequencies were "
+                              f"persisted); using freshly sampled frequencies that differ from training")
 
     @torch.no_grad()
     def _get_cos_sin(self, h: int, w: int, device: torch.device, dtype: torch.dtype):

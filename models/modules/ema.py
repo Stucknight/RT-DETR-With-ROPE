@@ -24,10 +24,13 @@ class ModelEMA(object):
             self.updates += 1
             d = self.decay_fn(self.updates)
             msd = model.state_dict()
+            ema_v, model_v = [], []
             for k, v in self.module.state_dict().items():
                 if v.dtype.is_floating_point:
-                    v *= d
-                    v += (1 - d) * msd[k].detach()
+                    ema_v.append(v)
+                    model_v.append(msd[k].detach())
+            # v = d * v + (1 - d) * m, fused across all tensors
+            torch._foreach_lerp_(ema_v, model_v, 1 - d)
 
     def to(self, *args, **kwargs):
         self.module = self.module.to(*args, **kwargs)

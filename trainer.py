@@ -11,8 +11,9 @@ def train_one_epoch(model, ema, criterion, dataloader, optimizer, scaler, epoch,
     pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
 
     for i, (samples, targets) in enumerate(pbar):
-        samples = samples.to(device)
-        targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+        samples = samples.to(device, non_blocking=True)
+        targets = [{k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
+                   for t in targets]
 
         with torch.autocast(device_type='cuda', cache_enabled=True):
             outputs = model(samples, targets=targets)
@@ -51,8 +52,9 @@ def evaluate(model, postprocessor, coco_evaluator, dataloader, device, epoch, us
 
     with torch.no_grad():
         for samples, targets in tqdm(dataloader, desc="Validation"):
-            samples = samples.to(device)
-            targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+            samples = samples.to(device, non_blocking=True)
+            targets = [{k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
+                       for t in targets]
             outputs = model(samples)
             orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
             results = postprocessor(outputs, orig_target_sizes)
