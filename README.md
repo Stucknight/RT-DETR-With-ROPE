@@ -26,7 +26,7 @@ Epoch 28)**:
 
 ---
 
-## 📈 Graphs
+## Graphs
 
 ![AP [0.5:0.95]](charts/apval.png)
 ![AP [0.5]](charts/ap0.5.png)
