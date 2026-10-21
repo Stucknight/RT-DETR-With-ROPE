@@ -101,32 +101,25 @@ class Mixed2DRoPE(nn.Module):
             angle = torch.rand(1) * math.tau if rotate else torch.zeros(1)
             fx.append(torch.cat([mag * torch.cos(angle), mag * torch.cos(angle + math.pi / 2)], dim=-1))
             fy.append(torch.cat([mag * torch.sin(angle), mag * torch.sin(angle + math.pi / 2)], dim=-1))
-        # The random per-head rotations are part of the model, so they must be saved with the checkpoint
-        self.register_buffer("freq_x", torch.stack(fx, 0))
-        self.register_buffer("freq_y", torch.stack(fy, 0))
-
-        self._cache: dict[tuple[int, int, torch.device, torch.dtype], tuple[torch.Tensor, torch.Tensor]] = {}
+        # Learnable mixed frequencies (RoPE-Mixed), initialised with a random 2D direction per head
+        self.freq_x = nn.Parameter(torch.stack(fx, 0))
+        self.freq_y = nn.Parameter(torch.stack(fy, 0))
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
                               error_msgs):
         super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
                                       error_msgs)
-        self._cache.clear()
         for name in ("freq_x", "freq_y"):
             if prefix + name in missing_keys:
                 missing_keys.remove(prefix + name)
                 warnings.warn(f"{prefix + name} missing from checkpoint (saved before RoPE frequencies were "
                               f"persisted); using freshly sampled frequencies that differ from training")
 
-    @torch.no_grad()
     def _get_cos_sin(self, h: int, w: int, device: torch.device, dtype: torch.dtype):
-        key = (h, w, device, dtype)
-        if key in self._cache:
-            return self._cache[key]
-
+        # Not cached: the frequencies change with every optimizer / EMA update. Angles are computed in fp32.
         # Tokens come from feat.flatten(2), i.e. row-major: index = y * w + x
-        t_x = torch.arange(w, device=device).repeat(h).to(dtype)
-        t_y = torch.arange(h, device=device).repeat_interleave(w).to(dtype)
+        t_x = torch.arange(w, device=device, dtype=torch.float32).repeat(h)
+        t_y = torch.arange(h, device=device, dtype=torch.float32).repeat_interleave(w)
 
         angle = ((t_x.unsqueeze(0).unsqueeze(0).unsqueeze(-1) * self.freq_x.unsqueeze(1)) +
                  (t_y.unsqueeze(0).unsqueeze(0).unsqueeze(-1) * self.freq_y.unsqueeze(1)))
@@ -134,8 +127,6 @@ class Mixed2DRoPE(nn.Module):
 
         cos = torch.repeat_interleave(cos_half, 2, dim=-1).to(dtype)
         sin = torch.repeat_interleave(sin_half, 2, dim=-1).to(dtype)
-
-        self._cache[key] = (cos, sin)
         return cos, sin
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, h: int, w: int):

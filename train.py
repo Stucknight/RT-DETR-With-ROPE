@@ -25,16 +25,31 @@ from models.rtdetr import RTDETR
 from trainer import train_one_epoch, evaluate
 
 
+NO_WEIGHT_DECAY = r"(?:norm|bn|rope\.freq)"
+
+
 def load_optimizer_state(optimizer, state, model):
-    if len(state["param_groups"]) == len(optimizer.param_groups):
+    try:
         optimizer.load_state_dict(state)
         return
-    # Older checkpoints used a single param group over model.parameters(); carry each parameter's state over
-    old_index = {id(p): i for i, p in enumerate(model.parameters())}
+    except ValueError:
+        pass
+    # Checkpoint from an older param layout, before the RoPE frequencies were parameters: either one group over
+    # model.parameters() or [decay, norm/bn]. Rebuild that order and carry each parameter's state over;
+    # the RoPE frequencies start with fresh optimizer state.
+    named = [(n, p) for n, p in model.named_parameters() if "rope.freq" not in n]
+    if len(state["param_groups"]) == 1:
+        old_order = [p for _, p in named]
+    else:
+        old_order = ([p for n, p in named if not re.search(r"(?:norm|bn)", n)] +
+                     [p for n, p in named if re.search(r"(?:norm|bn)", n)])
+    if len(old_order) != sum(len(g["params"]) for g in state["param_groups"]):
+        raise ValueError("Optimizer state in checkpoint does not match the model's parameters")
+    old_index = {id(p): i for i, p in enumerate(old_order)}
     params = [p for group in optimizer.param_groups for p in group["params"]]
     new_state = optimizer.state_dict()
     new_state["state"] = {j: state["state"][old_index[id(p)]] for j, p in enumerate(params)
-                          if old_index[id(p)] in state["state"]}
+                          if id(p) in old_index and old_index[id(p)] in state["state"]}
     optimizer.load_state_dict(new_state)
 
 
@@ -95,11 +110,11 @@ def main(args):
     criterion = RTDETRCriterionv2(matcher, {'loss_vfl': 1, 'loss_bbox': 5, 'loss_giou': 2}, losses=['vfl', 'boxes'],
                                   alpha=0.75, gamma=2.0, num_classes=80)
 
-    # No weight decay on BatchNorm / LayerNorm parameters
+    # No weight decay on BatchNorm / LayerNorm parameters or the RoPE frequencies
     params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
     param_groups = [
-        {"params": [p for n, p in params if not re.search(r"(?:norm|bn)", n)]},
-        {"params": [p for n, p in params if re.search(r"(?:norm|bn)", n)], "weight_decay": 0.0},
+        {"params": [p for n, p in params if not re.search(NO_WEIGHT_DECAY, n)]},
+        {"params": [p for n, p in params if re.search(NO_WEIGHT_DECAY, n)], "weight_decay": 0.0},
     ]
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay,
                                   fused=device == "cuda")
