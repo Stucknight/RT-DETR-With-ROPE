@@ -24,6 +24,7 @@ class RTDETRPostProcessor(nn.Module):
         self.num_classes = int(num_classes)
         self.remap_mscoco_category = remap_mscoco_category
         self.deploy_mode = False
+        self.label2category = torch.tensor([mscoco_label2category[i] for i in range(len(mscoco_label2category))])
 
     def forward(self, outputs, orig_target_sizes: torch.Tensor):
         logits, boxes = outputs['pred_logits'], outputs['pred_boxes']
@@ -47,8 +48,7 @@ class RTDETRPostProcessor(nn.Module):
                 boxes = torch.gather(boxes, dim=1, index=index.unsqueeze(-1).tile(1, 1, boxes.shape[-1]))
 
         if self.remap_mscoco_category:
-            labels = (torch.tensor([mscoco_label2category[int(x.item())] for x in labels.flatten()])
-                      .to(boxes.device).reshape(labels.shape))
+            labels = self.label2category.to(labels.device)[labels]
         results = []
         for lab, box, sco in zip(labels, boxes, scores):
             result = dict(labels=lab, boxes=box, scores=sco)

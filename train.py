@@ -1,10 +1,12 @@
 import argparse
 import logging
+import math
 import os
+import re
 
 import torch
 from pycocotools.coco import COCO
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import LambdaLR
 
 from data.dataloader import BatchImageCollateFuncion, DataLoader
 from data.dataset.coco_dataset import CocoDetection
@@ -23,6 +25,34 @@ from models.rtdetr import RTDETR
 from trainer import train_one_epoch, evaluate
 
 
+NO_WEIGHT_DECAY = r"(?:norm|bn|rope\.freq)"
+
+
+def load_optimizer_state(optimizer, state, model):
+    try:
+        optimizer.load_state_dict(state)
+        return
+    except ValueError:
+        pass
+    # Checkpoint from an older param layout, before the RoPE frequencies were parameters: either one group over
+    # model.parameters() or [decay, norm/bn]. Rebuild that order and carry each parameter's state over;
+    # the RoPE frequencies start with fresh optimizer state.
+    named = [(n, p) for n, p in model.named_parameters() if "rope.freq" not in n]
+    if len(state["param_groups"]) == 1:
+        old_order = [p for _, p in named]
+    else:
+        old_order = ([p for n, p in named if not re.search(r"(?:norm|bn)", n)] +
+                     [p for n, p in named if re.search(r"(?:norm|bn)", n)])
+    if len(old_order) != sum(len(g["params"]) for g in state["param_groups"]):
+        raise ValueError("Optimizer state in checkpoint does not match the model's parameters")
+    old_index = {id(p): i for i, p in enumerate(old_order)}
+    params = [p for group in optimizer.param_groups for p in group["params"]]
+    new_state = optimizer.state_dict()
+    new_state["state"] = {j: state["state"][old_index[id(p)]] for j, p in enumerate(params)
+                          if id(p) in old_index and old_index[id(p)] in state["state"]}
+    optimizer.load_state_dict(new_state)
+
+
 def main(args):
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -35,6 +65,7 @@ def main(args):
         wandb.init(project="RT-DETR-Train", config=vars(args))
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch.backends.cudnn.benchmark = True
 
     train_trans = Compose([
         RandomPhotometricDistort(p=0.5),
@@ -62,8 +93,12 @@ def main(args):
                                              stop_epoch=117)
     val_collate = BatchImageCollateFuncion()
 
-    train_dataloader = DataLoader(train_dataset, args.batch_size, shuffle=True, collate_fn=train_collate)
-    val_dataloader = DataLoader(val_dataset, args.batch_size * 2, shuffle=False, collate_fn=val_collate)
+    # Workers are re-created every epoch (no persistent_workers) so they pick up set_epoch() for the
+    # augmentation / multi-scale schedules.
+    train_dataloader = DataLoader(train_dataset, args.batch_size, shuffle=True, collate_fn=train_collate,
+                                  num_workers=args.num_workers, pin_memory=True, drop_last=True)
+    val_dataloader = DataLoader(val_dataset, args.batch_size * 2, shuffle=False, collate_fn=val_collate,
+                                num_workers=args.num_workers, pin_memory=True)
 
     backbone = PResNet(18, pretrained=True)
     encoder = HybridEncoder()
@@ -73,10 +108,26 @@ def main(args):
 
     matcher = HungarianMatcher({'cost_class': 2, 'cost_bbox': 5, 'cost_giou': 2}, use_focal_loss=True)
     criterion = RTDETRCriterionv2(matcher, {'loss_vfl': 1, 'loss_bbox': 5, 'loss_giou': 2}, losses=['vfl', 'boxes'],
-                                  num_classes=80)
+                                  alpha=0.75, gamma=2.0, num_classes=80)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
+    # No weight decay on BatchNorm / LayerNorm parameters or the RoPE frequencies
+    params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+    param_groups = [
+        {"params": [p for n, p in params if not re.search(NO_WEIGHT_DECAY, n)]},
+        {"params": [p for n, p in params if re.search(NO_WEIGHT_DECAY, n)], "weight_decay": 0.0},
+    ]
+    optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay,
+                                  fused=device == "cuda")
+
+    # Stepped every iteration: linear warmup over the first warmup_iters, times a cosine decay that changes once
+    # per epoch (epoch e uses 0.5 * (1 + cos(pi * (e - 1) / epochs))).
+    iters_per_epoch = len(train_dataloader)
+
+    def lr_lambda(it):
+        warmup = min(1.0, (it + 1) / args.warmup_iters) if args.warmup_iters > 0 else 1.0
+        return warmup * 0.5 * (1 + math.cos(math.pi * (it // iters_per_epoch) / args.epochs))
+
+    scheduler = LambdaLR(optimizer, lr_lambda)
     scaler = torch.amp.GradScaler(device)
     postprocessor = RTDETRPostProcessor(num_classes=80, remap_mscoco_category=True)
     coco_evaluator = CocoEvaluator(COCO("annotations/instances_val2017.json"))
@@ -87,10 +138,16 @@ def main(args):
     if args.resume:
         logger.info(f"Resuming from checkpoint: {args.resume}")
         checkpoint = torch.load(args.resume, map_location=device)
-        model.load_state_dict(checkpoint["ema"]["module"])
+        # Older checkpoints only stored the EMA weights
+        model.load_state_dict(checkpoint.get("model", checkpoint["ema"]["module"]))
         ema.load_state_dict(checkpoint["ema"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
-        scheduler.last_epoch = checkpoint["epoch"]
+        load_optimizer_state(optimizer, checkpoint["optimizer"], model)
+        if "scheduler" in checkpoint and "lr_lambdas" in checkpoint["scheduler"]:
+            scheduler.load_state_dict(checkpoint["scheduler"])
+        else:
+            # Older checkpoints used a per-epoch scheduler; jump to the first iteration of the next epoch
+            scheduler.last_epoch = checkpoint["epoch"] * iters_per_epoch - 1
+            scheduler.step()
         scaler.load_state_dict(checkpoint["scaler"])
         best_score = checkpoint.get("best_score", 0.0)
         start_epoch = checkpoint["epoch"] + 1
@@ -99,11 +156,9 @@ def main(args):
         train_dataloader.set_epoch(epoch)
         val_dataloader.set_epoch(epoch)
 
-        avg_epoch_loss = train_one_epoch(model, ema, criterion, train_dataloader, optimizer, scaler, epoch, device,
-                                         use_wandb)
+        avg_epoch_loss = train_one_epoch(model, ema, criterion, train_dataloader, optimizer, scheduler, scaler, epoch,
+                                         device, args.clip_max_norm, use_wandb)
         val_score = evaluate(model, postprocessor, coco_evaluator, val_dataloader, device, epoch, use_wandb)
-
-        scheduler.step()
 
         logger.info(
             f"[Epoch {epoch}] Train Loss: {avg_epoch_loss:.4f} | Val mAP: {val_score:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f}"
@@ -113,8 +168,10 @@ def main(args):
             best_score = val_score
             save_path = os.path.join(args.output_dir, "model.pth")
             torch.save({
+                "model": model.state_dict(),
                 "ema": ema.state_dict(),
                 "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
                 "scaler": scaler.state_dict(),
                 "epoch": epoch,
                 "best_score": best_score
@@ -133,7 +190,11 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=120)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument("--warmup_iters", type=int, default=2000, help="Linear LR warmup iterations (0 to disable)")
+    parser.add_argument("--clip_max_norm", type=float, default=0.1, help="Gradient clipping max norm (0 to disable)")
     parser.add_argument("--output_dir", type=str, default="checkpoints")
+    parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--disable_wandb", action="store_true")
 
     if len(sys.argv) == 1:

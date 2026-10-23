@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torchvision
 
-from .utils import box_iou, box_cxcywh_to_xyxy, generalized_box_iou
+from .utils import box_cxcywh_to_xyxy, elementwise_box_iou, elementwise_generalized_box_iou
 
 
 class RTDETRCriterionv2(nn.Module):
@@ -47,8 +47,8 @@ class RTDETRCriterionv2(nn.Module):
         if values is None:
             src_boxes = outputs['pred_boxes'][idx]
             target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
-            ious, _ = box_iou(box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
-            ious = torch.diag(ious).detach()
+            ious, _ = elementwise_box_iou(box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
+            ious = ious.detach()
         else:
             ious = values
 
@@ -80,8 +80,8 @@ class RTDETRCriterionv2(nn.Module):
         loss_bbox = nn.functional.l1_loss(src_boxes, target_boxes, reduction='none')
         losses['loss_bbox'] = loss_bbox.sum() / num_boxes
 
-        loss_giou = 1 - torch.diag(generalized_box_iou(
-            box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes)))
+        loss_giou = 1 - elementwise_generalized_box_iou(
+            box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes))
         loss_giou = loss_giou if boxes_weight is None else loss_giou * boxes_weight
         losses['loss_giou'] = loss_giou.sum() / num_boxes
         return losses
@@ -108,9 +108,7 @@ class RTDETRCriterionv2(nn.Module):
     def forward(self, outputs, targets, **kwargs):
         outputs_without_aux = {k: v for k, v in outputs.items() if 'aux' not in k}
 
-        num_boxes = sum(len(t["labels"]) for t in targets)
-        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
-        num_boxes = torch.clamp(num_boxes, min=1).item()
+        num_boxes = max(float(sum(len(t["labels"]) for t in targets)), 1.0)
 
         matched = self.matcher(outputs_without_aux, targets)
         indices = matched['indices']
@@ -181,11 +179,10 @@ class RTDETRCriterionv2(nn.Module):
         target_boxes = torch.cat([t['boxes'][j] for t, (_, j) in zip(targets, indices)], dim=0)
 
         if self.boxes_weight_format == 'iou':
-            iou, _ = box_iou(box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes))
-            iou = torch.diag(iou)
+            iou, _ = elementwise_box_iou(box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes))
         elif self.boxes_weight_format == 'giou':
-            iou = torch.diag(
-                generalized_box_iou(box_cxcywh_to_xyxy(src_boxes.detach()), box_cxcywh_to_xyxy(target_boxes)))
+            iou = elementwise_generalized_box_iou(box_cxcywh_to_xyxy(src_boxes.detach()),
+                                                  box_cxcywh_to_xyxy(target_boxes))
         else:
             raise AttributeError()
 

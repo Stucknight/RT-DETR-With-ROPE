@@ -2,7 +2,8 @@ import torch
 from tqdm import tqdm
 
 
-def train_one_epoch(model, ema, criterion, dataloader, optimizer, scaler, epoch, device, use_wandb=False):
+def train_one_epoch(model, ema, criterion, dataloader, optimizer, scheduler, scaler, epoch, device, clip_max_norm=0.0,
+                    use_wandb=False):
     model.train()
     criterion.train()
     dataloader.set_epoch(epoch)
@@ -11,8 +12,9 @@ def train_one_epoch(model, ema, criterion, dataloader, optimizer, scaler, epoch,
     pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
 
     for i, (samples, targets) in enumerate(pbar):
-        samples = samples.to(device)
-        targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+        samples = samples.to(device, non_blocking=True)
+        targets = [{k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
+                   for t in targets]
 
         with torch.autocast(device_type='cuda', cache_enabled=True):
             outputs = model(samples, targets=targets)
@@ -22,9 +24,13 @@ def train_one_epoch(model, ema, criterion, dataloader, optimizer, scaler, epoch,
 
         loss = sum(loss_dict.values())
         scaler.scale(loss).backward()
+        if clip_max_norm > 0:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_max_norm)
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad()
+        scheduler.step()
         ema.update(model)
 
         epoch_loss += loss.item()
@@ -51,8 +57,9 @@ def evaluate(model, postprocessor, coco_evaluator, dataloader, device, epoch, us
 
     with torch.no_grad():
         for samples, targets in tqdm(dataloader, desc="Validation"):
-            samples = samples.to(device)
-            targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+            samples = samples.to(device, non_blocking=True)
+            targets = [{k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in t.items()}
+                       for t in targets]
             outputs = model(samples)
             orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
             results = postprocessor(outputs, orig_target_sizes)
