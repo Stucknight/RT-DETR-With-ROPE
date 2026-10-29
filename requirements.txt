@@ -1,0 +1,7 @@
+torch
+torchvision
+faster_coco_eval
+wandb
+tqdm
+pycocotools
+

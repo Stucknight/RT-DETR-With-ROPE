@@ -44,12 +44,6 @@ Epoch 28)**:
 
 ---
 
-## Try It Out
-
-Use the `RT_DETR_TEST.ipynb` to try it out.
-
----
-
 ## Citation
 
 ```
